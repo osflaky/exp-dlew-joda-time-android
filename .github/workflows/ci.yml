@@ -1,0 +1,77 @@
+name: Android CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: macos-latest
+          arch: arm64
+          runner: macos-latest
+          expander_leg: macos-latest--arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+    - uses: actions/checkout@v6
+
+      # Temurin publishes no JDK 25 build for Windows on arm64, so setup-java finds no match
+      # there. The Microsoft Build of OpenJDK ships a native Windows aarch64 JDK 25, so use it
+      # on that leg only. Every other leg keeps Temurin.
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '25'
+        distribution: ${{ (matrix.os == 'windows-latest' && matrix.arch == 
+          'arm64') && 'microsoft' || 'temurin' }}
+        architecture: ${{ matrix.arch == 'arm64' && 'aarch64' || 'x64' }}
+        cache: gradle
+
+      # The Linux arm64 runner image has no preinstalled Android SDK (the x64 image does),
+      # so install one explicitly to provide ANDROID_HOME / sdk.dir.
+      # The action's default package list includes the obsolete 'tools' package, which
+      # current cmdline-tools can no longer resolve, so list the needed packages explicitly.
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        packages: 'platform-tools platforms;android-36 build-tools;35.0.0'
+
+      # Google publishes the Maven-distributed aapt2 used by AGP only as an x86_64 Linux binary.
+      # On the arm64 Linux runner, register qemu user-mode emulation so that binary can run.
+    - name: Enable x86_64 binary emulation for aapt2 (Linux arm64)
+      if: runner.os == 'Linux' && runner.arch == 'ARM64'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-user-static binfmt-support libc6-amd64-cross libstdc++6-amd64-cross libgcc-s1-amd64-cross
+        sudo mkdir -p /lib64
+        sudo ln -sf /usr/x86_64-linux-gnu/lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+        echo "QEMU_LD_PREFIX=/usr/x86_64-linux-gnu" >> "$GITHUB_ENV"
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build with Gradle
+      run: ./gradlew build
+
+      # The Android emulator needs hardware virtualization. On arm64 hosted runners, sdkmanager
+      # has no stable 'emulator' package and there is no nested virtualization, so no device can
+      # boot there. On those runners, still build the instrumentation test APKs so the
+      # androidTest sources are compiled and checked on this platform.
+    - name: Build instrumentation tests (no emulator available on arm64 runners)
+      if: runner.arch != 'X64'
+      run: ./gradlew assembleAndroidTest
+
+    - name: Run tests on emulator
+      if: runner.arch == 'X64'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 30
+        arch: x86
+        target: aosp_atd
+        script: ./gradlew connectedCheck
+    name: build [${{ matrix.expander_leg }}]
+    timeout-minutes: 150

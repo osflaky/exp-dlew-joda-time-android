@@ -1,0 +1,14 @@
+apply plugin: 'groovy'
+
+dependencies {
+    implementation gradleApi()
+    implementation localGroovy()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation libs.jodaTime
+}

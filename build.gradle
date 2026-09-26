@@ -1,0 +1,16 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath libs.android.gradlePlugin
+        classpath libs.gradleMavenPublishPlugin
+    }
+}
+
+plugins {
+    alias(libs.plugins.versions)
+}
+
+apply plugin: 'android-reporting'
